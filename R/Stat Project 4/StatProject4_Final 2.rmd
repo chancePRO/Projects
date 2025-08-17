@@ -1,0 +1,704 @@
+---
+title: "StatProject4_Final"
+author: "Jodi Barnes"
+date: "2025-04-29"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+required libraries
+```{r}
+library(tree)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(randomForest)
+library(ucimlrepo)
+library(gbm)
+library(tidyverse)
+```
+
+import data
+```{r}
+```
+
+# ===============================
+# Research Question 1:
+# Which features are most important for distinguishing red vs. white wine?
+# How do the features chosen by the tree-based models compare with logistic regression or the previous classifiers?
+# ===============================
+
+
+
+# ===============================
+# Research Question 2(a):
+# A single, simple classification tree (use depth 2)
+# ===============================
+ 
+```{r}
+# Convert wine_type to factor (if not already)
+wine_combined$wine_type <- as.factor(wine_combined$wine_type)
+ 
+# Split the data into training and testing sets (70% train, 30% test)
+set.seed(123) # For reproducibility
+train_indices <- createDataPartition(wine_combined$wine_type, p = 0.7, list = FALSE)
+train_data <- wine_combined[train_indices, ]
+test_data <- wine_combined[-train_indices, ]
+ 
+# Fit a simple classification tree with depth 2
+wine_tree <- rpart(wine_type ~ ., 
+                   data = train_data,
+                   method = "class",
+                   control = rpart.control(maxdepth = 2))
+ 
+# Visualize the tree
+rpart.plot(wine_tree, extra = 104, box.palette = "RdBu", shadow.col = "gray")
+ 
+# Make predictions on test data
+predictions <- predict(wine_tree, test_data, type = "class")
+ 
+# Create confusion matrix
+conf_matrix <- confusionMatrix(predictions, test_data$wine_type)
+ 
+# Print performance metrics
+print(conf_matrix)
+ 
+# Display important metrics
+cat("\nAccuracy:", conf_matrix$overall["Accuracy"], "\n")
+cat("Sensitivity:", conf_matrix$byClass["Sensitivity"], "\n")
+cat("Specificity:", conf_matrix$byClass["Specificity"], "\n")
+ 
+# Check which features were most important in this simple tree
+print(wine_tree$variable.importance)
+```
+```{r}
+# Extract variable importance from the tree
+tree_importance <- wine_tree$variable.importance
+tree_importance_df <- data.frame(
+  Feature = names(tree_importance),
+  Importance = as.numeric(tree_importance)
+)
+ 
+# Sort by importance
+tree_importance_df <- tree_importance_df[order(tree_importance_df$Importance, decreasing = TRUE), ]
+ 
+# Create a horizontal bar plot for tree variable importance
+ggplot(tree_importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Variable Importance from Decision Tree (Depth 2)",
+    x = "Feature",
+    y = "Importance (Reduction in Gini Impurity)"
+  )
+```
+
+
+# ===============================
+# Research Question 2(b):
+# Bagging (bootstrap aggregating)
+# ===============================
+
+
+
+# ===============================
+# Research Question 2(c):
+# Random forests
+# ===============================
+
+
+
+# ===============================
+# Research Question 3:
+# How do tuning parameters (tree depth, number of trees, mtry, learning rate) affect accuracy and overfitting?
+# ===============================
+
+
+
+# ===============================
+# Research Question 4:
+# What is the trade-off between model interpretability (a single tree) and predictive performance (ensembles)?
+# ===============================
+
+ 
+```{r}
+```
+```{r}
+# Extract variable importance from the tree
+tree_importance <- wine_tree$variable.importance
+tree_importance_df <- data.frame(
+  Feature = names(tree_importance),
+  Importance = as.numeric(tree_importance)
+)
+ 
+# Sort by importance
+tree_importance_df <- tree_importance_df[order(tree_importance_df$Importance, decreasing = TRUE), ]
+ 
+# Create a horizontal bar plot for tree variable importance
+ggplot(tree_importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Variable Importance from Decision Tree (Depth 2)",
+    x = "Feature",
+    y = "Importance (Reduction in Gini Impurity)"
+  )
+```
+```{r}
+# Train multiple models for comparison
+# Decision Tree (already created)
+wine_tree <- rpart(wine_type ~ ., 
+                   data = train_data,
+                   method = "class",
+                   control = rpart.control(maxdepth = 2))
+ 
+# Random Forest
+wine_rf <- randomForest(wine_type ~ ., data = train_data, ntree = 100)
+ 
+# Gradient Boosting Machine
+wine_gbm <- gbm(ifelse(wine_type == "white", 1, 0) ~ ., 
+                data = train_data, 
+                distribution = "bernoulli", 
+                n.trees = 100,
+                interaction.depth = 3)
+ 
+# Create a list to store models and their names
+models <- list(
+  DecisionTree = wine_tree,
+  RandomForest = wine_rf,
+  GBM = wine_gbm
+)
+ 
+# Function to get predictions and probabilities
+get_predictions <- function(model, test_data, model_type) {
+  if (model_type == "DecisionTree") {
+    pred_class <- predict(model, test_data, type = "class")
+    pred_prob <- predict(model, test_data, type = "prob")[, "white"]
+  } else if (model_type == "RandomForest") {
+    pred_class <- predict(model, test_data)
+    pred_prob <- predict(model, test_data, type = "prob")[, "white"]
+  } else if (model_type == "GBM") {
+    pred_prob <- predict(model, test_data, n.trees = 100, type = "response")
+    pred_class <- ifelse(pred_prob > 0.5, "white", "red")
+    pred_class <- factor(pred_class, levels = levels(test_data$wine_type))
+  }
+  return(list(class = pred_class, prob = pred_prob))
+}
+ 
+# Create dataframes to store results
+results <- data.frame(
+  Model = character(),
+  Accuracy = numeric(),
+  Sensitivity = numeric(),
+  Specificity = numeric(),
+  AUC = numeric(),
+  stringsAsFactors = FALSE
+)
+ 
+# Create a list to store ROC objects
+roc_list <- list()
+ 
+# Calculate performance metrics for each model
+for (model_name in names(models)) {
+  # Get predictions
+  preds <- get_predictions(models[[model_name]], test_data, model_name)
+  # Create confusion matrix
+  conf <- confusionMatrix(preds$class, test_data$wine_type, positive = "white")
+  # Calculate ROC and AUC
+  roc_obj <- roc(ifelse(test_data$wine_type == "white", 1, 0), preds$prob)
+  roc_list[[model_name]] <- roc_obj
+  # Store results
+  results <- rbind(results, data.frame(
+    Model = model_name,
+    Accuracy = conf$overall["Accuracy"],
+    Sensitivity = conf$byClass["Sensitivity"],
+    Specificity = conf$byClass["Specificity"],
+    AUC = auc(roc_obj),
+    stringsAsFactors = FALSE
+  ))
+}
+ 
+# Print performance metrics table
+print(results)
+ 
+# Visualize accuracy comparison
+ggplot(results, aes(x = reorder(Model, Accuracy), y = Accuracy, fill = Model)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Model Accuracy Comparison",
+    x = "Model",
+    y = "Test Accuracy"
+  ) +
+  theme(legend.position = "none")
+ 
+# Plot ROC curves
+plot(roc_list[["DecisionTree"]], col = "blue", main = "ROC Curves Comparison")
+plot(roc_list[["RandomForest"]], col = "red", add = TRUE)
+plot(roc_list[["GBM"]], col = "green", add = TRUE)
+ 
+# Fix for the legend issue - create legend manually
+legend_text <- c(
+  paste("DecisionTree (AUC =", round(results$AUC[results$Model == "DecisionTree"], 3), ")"),
+  paste("RandomForest (AUC =", round(results$AUC[results$Model == "RandomForest"], 3), ")"),
+  paste("GBM (AUC =", round(results$AUC[results$Model == "GBM"], 3), ")")
+)
+legend("bottomright", legend = legend_text, col = c("blue", "red", "green"), lwd = 2)
+ 
+# Feature importance comparison
+# Extract variable importance from Random Forest
+rf_importance <- importance(wine_rf)
+rf_importance_df <- data.frame(
+  Feature = rownames(rf_importance),
+  RF_Importance = rf_importance[, "MeanDecreaseGini"]
+)
+ 
+# Extract variable importance from GBM
+gbm_importance <- summary(wine_gbm, plotit = FALSE)
+gbm_importance$Feature <- as.character(gbm_importance$var)
+gbm_importance_df <- data.frame(
+  Feature = gbm_importance$Feature,
+  GBM_Importance = gbm_importance$rel.inf
+)
+ 
+# Merge importance dataframes
+importance_comparison <- merge(tree_importance_df, rf_importance_df, by = "Feature", all = TRUE)
+importance_comparison <- merge(importance_comparison, gbm_importance_df, by = "Feature", all = TRUE)
+ 
+# Replace NA with 0
+importance_comparison[is.na(importance_comparison)] <- 0
+ 
+# Get top 10 features by combined importance
+importance_comparison$Total <- rowSums(importance_comparison[, c("Importance", "RF_Importance", "GBM_Importance")])
+top10_features <- importance_comparison %>%
+  arrange(desc(Total)) %>%
+  head(10) %>%
+  pull(Feature)
+ 
+# Filter for top 10 features
+importance_comparison_filtered <- importance_comparison %>%
+  filter(Feature %in% top10_features) %>%
+  select(-Total) %>%
+  pivot_longer(cols = c("Importance", "RF_Importance", "GBM_Importance"),
+               names_to = "Model",
+               values_to = "Importance") %>%
+  mutate(Model = case_when(
+    Model == "Importance" ~ "Decision Tree",
+    Model == "RF_Importance" ~ "Random Forest",
+    Model == "GBM_Importance" ~ "GBM"
+  ))
+ 
+# Plot feature importance comparison
+ggplot(importance_comparison_filtered, 
+       aes(x = reorder(Feature, Importance), y = Importance, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Top 10 Feature Importance Comparison Across Models",
+    x = "Feature",
+    y = "Relative Importance"
+  )
+```
+
+
+# ===============================
+# Research Question 5 (Bonus):
+# Compute Shapley values using the treeshap package
+# ===============================
+```{r}
+# Install devtools if not already installed
+if (!require("devtools")) install.packages("devtools")
+
+# Install treeshap from GitHub
+devtools::install_github("ModelOriented/treeshap")
+```
+
+```{r}
+# Load libraries
+library(ranger)   # Needed because treeshap expects a ranger model
+library(treeshap) # To compute Shapley values
+library(dplyr)    # For data wrangling
+```
+
+## Preprocessing:
+```{r}
+setwd("/Users/eliseeldridge/desktop/StatsLearning/Proj_4/")
+```
+
+```{r}
+# Read CSV files with semicolon separators and comma decimals
+red_wine <- read.csv2(
+  '/Users/eliseeldridge/desktop/StatsLearning/Proj_4/wine+quality/winequality-red.csv',
+  dec = ","
+)
+
+white_wine <- read.csv2(
+  '/Users/eliseeldridge/desktop/StatsLearning/Proj_4/wine+quality/winequality-white.csv',
+  dec = ","
+)
+
+# Convert character columns to numeric (if needed)
+numeric_cols <- c(
+  "fixed.acidity", "volatile.acidity", "citric.acid", "residual.sugar",
+  "chlorides", "free.sulfur.dioxide", "total.sulfur.dioxide", "density",
+  "pH", "sulphates", "alcohol"
+)
+
+red_wine <- red_wine %>%
+  mutate(across(all_of(numeric_cols), as.numeric))
+
+white_wine <- white_wine %>%
+  mutate(across(all_of(numeric_cols), as.numeric))
+
+# Add 'type' column and combine datasets
+red_wine$type <- "red"
+white_wine$type <- "white"
+wine_data <- bind_rows(red_wine, white_wine) %>%
+  mutate(type = as.factor(type))
+
+```
+
+## Train Random Forest Model:
+```{r}
+# Add binary target for regression (probability of "red")
+wine_data$is_red <- as.numeric(wine_data$type == "red")
+
+# Create predictors (exclude "type" and "is_red")
+X_features_reg <- wine_data %>% select(-type, -is_red)
+
+# Train regression model
+set.seed(123)
+rf_model_reg <- ranger(
+  formula = is_red ~ .,  # Predictors: all columns in X_features_reg
+  data = data.frame(is_red = wine_data$is_red, X_features_reg),
+  num.trees = 500
+)
+
+```
+
+## Compute Shapley Values with treeshap
+```{r}
+# Unify the model
+unified_model_reg <- ranger.unify(rf_model_reg, X_features_reg)
+
+# Compute Shapley values
+shap_output_reg <- treeshap(unified_model_reg, X_features_reg)
+
+# View results
+print(shap_output_reg)
+```
+```{r}
+# Summarize mean per feature
+mean_abs_shap <- colMeans(abs(shap_output_reg$shaps))
+top10 <- sort(mean_abs_shap, decreasing = TRUE)[1:10]
+```
+
+```{r}
+# Print as a table
+library(tibble)
+library(knitr)
+top_df <- data.frame(
+  Feature    = names(top10),
+  Importance = unname(top10)
+) %>%
+  rownames_to_column("Rank") %>%
+  mutate(Rank = as.integer(Rank)) %>%
+  arrange(Rank)
+
+kable(top_df, caption = "Top 10 Features by Mean |Shapley Value|")
+```
+
+```{r}
+# Simple barplot
+barplot(
+  top10,
+  las = 2,               # make labels vertical
+  main = "Top 10 Features by Mean |Shapley Value|",
+  ylab = "Mean |Shapley value|"
+)
+```
+
+# Total data
+---
+title: "StatLearningProj4"
+author: "Chance Pickett"
+date: "2025-04-24"
+output: pdf_document
+---
+Required libraries
+```{r}
+library(tree)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(randomForest)
+library(ucimlrepo)
+library(gbm)
+```
+
+Fetch data
+```{r}
+wine_quality = fetch_ucirepo(id=186)
+```
+
+turn th eraw data into a usable format
+```{r}
+wine_data <- wine_quality$data$original
+```
+
+turn the color column into a "factor" (categorical variable) i couldnt get it to work wihtout this change
+```{r}
+wine_data$color <- as.factor(wine_data$color)
+wine_data
+```
+
+Set seed for reproducability
+```{r}
+set.seed(1)
+```
+
+Here I am fitting a regression tree to the Wine data set. First, I create a training set, and fit the tree to the training data
+```{r}
+train <- sample(1:nrow(wine_data), nrow(wine_data) / 2)
+tree.wine_data <- tree(color ~ ., wine_data, subset = train)
+summary(tree.wine_data)
+```
+Key notes:
+1. chlorides, total_sulfur_dioxide, sulphates, volatile_acidity, pH, and density are the most important factors in determining wine color
+"The model chooses these by selecting regions that minimze the classification error rate. It is computationally infeasible to consider every possible region space, so the model takes a 'top-down, greedy' approach that is known as binary splitting. The approach is top-down because it begins at the top of the tree and then succesivley splits the predictor space; each split is indicated via two new branches further down on the tree. It is greedy because at each step of the tree-building process, the best split is amde the particular step, rath then looking ahead and picking a split that will elad to better tree in some future step." (Our tectbook). What the book is saying is that technically, it is possible the tree is not making the best splits in the predictor space (aka choosing the most important variables) because it would take too much computation to try every single split and look into the future splits as well, however it is still pretty good. Also, the tree make the splits by creating regions that minimizes the calssification error rate, which is "simply the fraction of the training observations in that region that do not belong to tthe most common class. This means it is trying to create regions where most of the observations in each region are homogenous (very similar). We can choose when to stop the splits by hving a stopping point such as every region being completely homogenous. (I apologize for the longass paragraph, and no I did not AI this)
+2. The tree has 11 terminal nodes (I will explain later)
+3. 0.1161 residual mean deviance. This shows well the model fits to the training data. This shows how homogenous the splits are. If each split was completely homogenous, the residual mean deviance would be 0.
+4. miscalssification error rate is 0.01324. This is the training error rate. we have a training error of 1%!! muy bueno
+
+Now I plot it
+```{r}
+plot(tree.wine_data)
+text(tree.wine_data, pretty = 0)
+```
+According to the plot, we can see the 11 terminal nodes (leafs) and the splitting variables. The plot shows us that chlorides is the most important variable when predicting wine color.
+
+"In order to properly evaluate th eperformance of a classification tree on these data, we must estimate the test error rather than simply computing the training error. We split the observations into a training set and a test set, build the tree using the training set, and evaluate its performance on the test data." (our textbook)
+I will do this here:
+```{r}
+#Create test set
+test <- test <- setdiff(1:nrow(wine_data), train)
+wine_test <- wine_data[test, ]
+
+#Make predictions
+wine_pred <- predict(tree.wine_data, wine_test, type = "class")
+table(Predicted = wine_pred, Actual = wine_test$color)
+mean(wine_pred == wine_test$color)
+```
+What this did was use the training model on the test data, which is data it ahsnt seen before. This is a better indicator of model performance because the data is new. It tells us that our mdoel was 98@ accurate or that it predicted the color of wine correctly 98% of the time. the matrix tells us that 21 red wines were classified as red and 34 red wines were classified as white. Going back to our tree, it is possible that these wines had an unusual number of chlorides or total_sulfur_dioxide.
+
+Pruning
+So our classification tree did really well, however this process "is likely to overfit the data,leading to poor test set performance" (textbook). I think our model did well because of the number of observation we have and the quality of our data, and the fact that our test data came form the same dataset. Anyways, this process can overfit because "teh resulting tree may be too complex. A smaller tree with fewer splits  migh tlead to lower variance and better interpretaion at the cost of a little bias. One possible alternative to the process is to build the tree only so long as the decrease in the classification error rate due to each split exceeds some threshold. This strategy will reslut in smaller trees, but is too short-sighted since a seemingly worthless split early on in th etree migh tbe followed by a very good split - that is, a split that leads to a large reduction in classification error rate later on. Therefor, a better strategy is to grow a very large tree and then prune it back in order to obtain a subtree. In order to choose the best tree, the goal is to select a subtree that leads to the lowest test error rate. Given a subtree, we can estimate its test error using cv or the validation set approach. However, estimating teh cv error for every possible subtree would be too cumbersome, since there is an extremely large number of possible subtrees. Instead we need a way to select a small set of subtrees for consideration. Cost complexity pruning - also known as weakest link pruning gives us a way to do this. Rather than considering every possible subtree, we consider a sequence of trees indexed by a nonnegative tuning parameter alpha. Alpha controls a tradeoff between the subtrees complextiy and its fit to the training data. We can select alpha using a validation set or cv. We then return to the full dataset and obtain the subtree corresponding to alpha." (textbook)
+I will code this here
+```{r}
+#Change seed because we are doing cv
+set.seed(2)
+
+#do cv to find optimal tree size
+cv.wine <- cv.tree(tree.wine_data, FUN = prune.misclass)
+
+cv.wine
+```
+So what this is is a 'plot' showing us statistics for different sized or 'pruned' trees from our model. The size is the number of terminal nodes in the tree. As you can see, it starts at 11, which was the original unpruned model, and goes all the way to jsut one terminal node (leaf). The dev number is the number of cv errors for each model and k is the correspnoding alpha value. Surprisingly, our orginal tree with 11 nodes also has the least cv errors. Meaning an unpruned tree is optimal.
+
+I can plot this here:
+```{r}
+par(mfrow = c(1, 2))
+plot(cv.wine$size, cv.wine$dev, type = "b")
+plot(cv.wine$k, cv.wine$dev, type = "b")
+```
+The left graph shows how as the number of terminal nodes increases, the cv errors also decrease, leaving us with an unpruned tree being optimal. Also, the grpah on the left shows that as the alpha level increases, so does the cv errors.
+
+Other notes from our textbook:
+Advantages of Trees:
+1. Trees are very easy to explain to people. In fact, they are even easier to explain than linear regression!
+2. Some people believe that decisoin trees more closely mirror human decision-making than do the regression and classification approaches seen in previous chapters.
+3. Trees can be displayed graphically, and are easily interpreted even by a non-expert (especially if they are small).
+4. Trees can easily handle qualitative predictors without the need to create dummy variables (one-hot encode)
+Disadvantaages of Trees:
+1. Unfortunately, trees generally do not have the same level of rpedictive accuracy as some of the other regression and classification approaches seen in this book.
+2. Additionally, trees can be very non-robust. In ohter words, a small change in the data can cause a large chang ein the final estimated tree
+
+Now that I have made the most optimal tree for predicting wine color, and have discussed how trees are powerful but can be weaker in some situations, lets "aggregate many decision trees, using methods like bagging, random forests, and boosting,to improve the performance" (textbook)
+
+Bagging
+Some background form our textbook: Averaging a set of observations reduces variance. Hence a natural way to reduce the variance and increase the test set accuracy of a statistical learning method is to take many training sets from the population, build a separate prediction model using each training set, and average the resulting predictions. Of course this is not practical because we do not generally have access to multiple training sets. Instead, we can bootstrap, by taking repeated samples from the single training data set. We train our method on the last bootstrapped training set and finally average all the predictions. THIS IS BAGGING
+I code this here:
+```{r}
+# set new seed for new modeling technique
+set.seed(3)
+
+bag.wine <- randomForest(color ~., data = wine_data, subset = train, mtry = 12, importance = TRUE)
+bag.wine
+```
+This is a random forest. The only difference between a random forest that uses bagging and one that doesn't is that at each split in each tree, bagging is allowed to split on any predictor. The issue with bagging is that it is allowed to pick the same predictor multiple times, causing correlation between them.
+Key Notes:
+1. 500 decision trees
+2. OOB means out of bag, which are observations that were not randomly selected in the bootstrappign process. This error rate is kind of like a test set error, so 1% is really good. we can assume it will do well on a true test set
+3. The matrix shows that red wines had a 3% error rate and white had less than 1%
+
+Now lets run it on test data
+```{r}
+# Make predictions on test data
+yhat.bag <- predict(bag.wine, newdata = wine_test)
+
+# Calculate accuracy
+mean(yhat.bag == wine_test$color)
+
+# Create confusion matrix
+table(Predicted = yhat.bag, Actual = wine_test$color)
+```
+99.3% accuracy on test data. Just as expected the model did really well
+
+Now lets try without bagging
+```{r}
+set.seed(4)
+rf.wine <- randomForest(color ~ ., data = wine_data, 
+                       subset = train, 
+                       mtry = sqrt(12),
+                       importance = TRUE)
+
+# Make predictions on test data
+yhat.rf <- predict(rf.wine, newdata = wine_test)
+
+# Create confusion matrix
+confusion_matrix <- table(Predicted = yhat.rf, Actual = wine_test$color)
+print(confusion_matrix)
+
+# Calculate accuracy
+accuracy <- mean(yhat.rf == wine_test$color)
+print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
+
+# Variable importance
+importance(rf.wine)
+varImpPlot(rf.wine)
+```
+Key Notes:
+1. 99.6% test set accuracy, which is a 0.3% increase from bagging
+2. total_sulfur_dioxide and chlorides are again the most important variables
+
+Boosting
+Boosting is  fitting a tree using the current residuals, rather than the outcome, as the response. Then add this new tree into the fitted function on order to update the residuals. This is "learning slowly". This means the construction of each tree depends strongly on the trees that have already been grown.
+```{r}
+set.seed(5)
+# Convert the factor color variable to a numeric 0/1 variable
+# Assuming the first level is "red" and the second is "white"
+wine_data_boost <- wine_data
+wine_data_boost$color_numeric <- ifelse(wine_data$color == levels(wine_data$color)[2], 1, 0)
+
+# Fit a boosted model for wine color classification
+boost.wine <- gbm(color_numeric ~ . - color, 
+                  data = wine_data_boost[train, ], 
+                  distribution = "bernoulli",
+                  n.trees = 5000, 
+                  interaction.depth = 4)
+
+# View variable importance
+summary(boost.wine)
+```
+Key Notes:
+total_sulfur_dioxide and chlorides are again th emost inlfuential variables
+
+lets take a look at them
+```{r}
+plot(boost.wine, i = "total_sulfur_dioxide")
+plot(boost.wine, i = "chlorides")
+```
+Key notes:
+1. As total_sulfur_dioxide increases,the probability of the wine being white increases
+2. As chlorides increase to 0.1, the probability of the iwne being white is high at one point then goes back down and stays consistently low.
+
+Now lets use test data
+```{r}
+# Make predictions on test data
+yhat.boost <- predict(boost.wine, 
+                     newdata = wine_data_boost[-train, ], 
+                     n.trees = 5000, 
+                     type = "response")
+
+# Convert probabilities to class predictions
+yhat.boost.class <- ifelse(yhat.boost > 0.5, levels(wine_data$color)[2], levels(wine_data$color)[1])
+
+# Compute accuracy
+mean(yhat.boost.class == wine_data[-train, "color"])
+
+# Create confusion matrix
+table(Predicted = yhat.boost.class, Actual = wine_data[-train, "color"])
+```
+99.5% accuracy, showing a 0.1% decrease in test accuracy from the non bagged random forest model
+
+```{r}
+# Model Diagnostics - Compare all methods
+#---------------------------------------
+
+# Convert predictions to probabilities for ROC curves
+# For the tree model
+tree.prob <- predict(tree.wine_data, wine_test, type = "vector")[,2]
+
+# For random forest (already has probabilities)
+rf.prob <- predict(rf.wine, newdata = wine_test, type = "prob")[,2]
+
+# For bagging (already has probabilities)
+bag.prob <- predict(bag.wine, newdata = wine_test, type = "prob")[,2]
+
+# Install and load packages for ROC curves if needed
+if(!require(pROC)) install.packages("pROC")
+library(pROC)
+
+# Calculate ROC curves and AUC for each model
+roc.tree <- roc(wine_test$color == levels(wine_test$color)[2], tree.prob)
+roc.rf <- roc(wine_test$color == levels(wine_test$color)[2], rf.prob)
+roc.bag <- roc(wine_test$color == levels(wine_test$color)[2], bag.prob)
+roc.boost <- roc(wine_test$color == levels(wine_test$color)[2], yhat.boost)
+
+# Plot ROC curves
+plot(roc.tree, col = "red", main = "ROC Curves for All Models")
+lines(roc.rf, col = "blue")
+lines(roc.bag, col = "green")
+lines(roc.boost, col = "purple")
+legend("bottomright", legend = c(paste("Tree (AUC =", round(auc(roc.tree), 3), ")"),
+                                paste("RF (AUC =", round(auc(roc.rf), 3), ")"),
+                                paste("Bagging (AUC =", round(auc(roc.bag), 3), ")"),
+                                paste("Boosting (AUC =", round(auc(roc.boost), 3), ")")),
+       col = c("red", "blue", "green", "purple"), lty = 1)
+
+# Explore bias-variance tradeoff - Compare error rates as we change ensemble size and tree depth
+# Test different numbers of trees in Random Forest
+error.rates <- data.frame(ntrees = seq(10, 500, by = 50), OOB.error = NA)
+
+for(i in 1:nrow(error.rates)) {
+  rf.temp <- randomForest(color ~ ., data = wine_data, 
+                         subset = train, 
+                         ntree = error.rates$ntrees[i],
+                         mtry = sqrt(12))
+  error.rates$OOB.error[i] <- rf.temp$err.rate[error.rates$ntrees[i], "OOB"]
+}
+
+# Plot error rate vs number of trees
+plot(error.rates$ntrees, error.rates$OOB.error, type = "l", 
+     xlab = "Number of Trees", ylab = "OOB Error Rate",
+     main = "Bias-Variance Tradeoff: Effect of Ensemble Size")
+
+# Compare variable importance across models
+par(mfrow = c(1, 3))
+# Random Forest
+varImpPlot(rf.wine, main = "Random Forest Variable Importance")
+# Bagging
+varImpPlot(bag.wine, main = "Bagging Variable Importance")
+# Boosting
+summary(boost.wine, plotit = TRUE, cBars = 10, main = "Boosting Variable Importance")
+
+# Reset plot layout
+par(mfrow = c(1, 1))
+```
